@@ -201,48 +201,57 @@ class SteamKeyLibrary:
             print(f"[ERROR] Steam search failed: {e}")
 
     def load_bundles(self):
-
         game_name = self.search_results.get(tk.ACTIVE).split(" |")[0].strip()
         if not game_name:
             print("[ERROR] No game name provided.")
             return
 
-        try:
-            search_url = f"https://isthereanydeal.com/search/?q={urllib.parse.quote(game_name)}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            res = requests.get(search_url, headers=headers)
-            soup = BeautifulSoup(res.text, "html.parser")
+        api_key = os.environ.get("ITAD_API_KEY")
+        if not api_key:
+            print("[ERROR] ITAD_API_KEY environment variable not set.")
+            return
 
-            first_result = soup.select_one("a.search__result__title")
-            if not first_result:
+        try:
+            # Convert game title to ITAD plain
+            plain_resp = requests.get(
+                "https://api.isthereanydeal.com/v02/game/plain/",
+                params={"key": api_key, "title": game_name},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            plain_data = plain_resp.json()
+            plain = None
+            if "data" in plain_data:
+                # API returns {"data": {"title": "plain"}}
+                plain = list(plain_data["data"].values())[0]
+            if not plain:
                 print("[ERROR] Game not found on ITAD.")
                 return
 
-            slug = first_result.get("href")  # e.g. /game/griftlands/
-            bundle_url = f"https://isthereanydeal.com{slug}bundles/"
-
-            res = requests.get(bundle_url, headers=headers)
-            soup = BeautifulSoup(res.text, "html.parser")
-
-            bundle_list = soup.select("li.bundle")
+            # Query bundles for this plain
+            bundle_resp = requests.get(
+                "https://api.isthereanydeal.com/v01/game/bundles/",
+                params={"key": api_key, "plains": plain},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            bundle_data = bundle_resp.json()
             bundles = []
-
-            for bundle in bundle_list:
-                name = bundle.select_one("strong")
-                date = bundle.select_one("span.date")
-                if name and "humble" in name.text.lower():
-                    bundle_name = name.text.strip()
-                    bundle_date = date.text.strip() if date else ""
-                    bundles.append(f"{bundle_name} - {bundle_date}")
+            if "data" in bundle_data and plain in bundle_data["data"]:
+                for b in bundle_data["data"][plain]:
+                    name = b.get("title", "Unknown Bundle")
+                    start = b.get("start")
+                    date = start.split(" ")[0] if start else ""
+                    bundles.append(f"{name} - {date}")
 
             if not bundles:
-                bundles = ["No Humble bundles found"]
+                bundles = ["No bundles found"]
 
             self.bundle_dropdown["values"] = bundles
             self.bundle_dropdown.current(0)
 
         except Exception as e:
-            print(f"[ERROR] Bundle scraping failed: {e}")
+            print(f"[ERROR] Bundle loading failed: {e}")
 
 
     def save_game(self, window):
