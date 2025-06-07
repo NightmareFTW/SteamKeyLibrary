@@ -18,6 +18,7 @@ class SteamKeyLibrary:
 
         self.games = []
         self.data_file = "games_data.json"
+        self.edit_index = None
         self.load_data()
 
         self.create_ui()
@@ -50,7 +51,15 @@ class SteamKeyLibrary:
             borderwidth=0,
             font=("Segoe UI", 11, "bold")
         )
-        add_button.pack()
+        add_button.pack(side="left")
+
+        search_frame = tk.Frame(top_frame, bg="#1b2838")
+        search_frame.pack(side="right")
+        tk.Label(search_frame, text="Search:", bg="#1b2838", fg="#ffffff").pack(side="left")
+        self.search_var = tk.StringVar()
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var, width=30)
+        search_entry.pack(side="left", padx=(5, 0))
+        self.search_var.trace_add("write", lambda *args: self.refresh_games())
 
         self.games_frame = tk.Frame(self.root, bg="#1b2838")
         self.games_frame.pack(fill="both", expand=True)
@@ -61,7 +70,11 @@ class SteamKeyLibrary:
         for widget in self.games_frame.winfo_children():
             widget.destroy()
 
+        search_text = self.search_var.get().lower() if hasattr(self, "search_var") else ""
+        display_index = 1
         for index, game in enumerate(self.games):
+            if search_text and search_text not in game.get("name", "").lower():
+                continue
             frame = tk.Frame(self.games_frame, bg="#2a475e", padx=10, pady=10)
             frame.pack(padx=10, pady=8, fill="x")
 
@@ -85,13 +98,20 @@ class SteamKeyLibrary:
             info_frame = tk.Frame(frame, bg="#2a475e")
             info_frame.pack(side="left", fill="both", expand=True)
 
-            tk.Label(info_frame, text=f"{index + 1}. {game['name']}", font=("Segoe UI", 12, "bold"), bg="#2a475e", fg="white").pack(anchor="w")
+            tk.Label(info_frame, text=f"{display_index}. {game['name']}", font=("Segoe UI", 12, "bold"), bg="#2a475e", fg="white").pack(anchor="w")
             tk.Label(info_frame, text=f"Bundle: {game['bundle']}", font=("Segoe UI", 10), bg="#2a475e", fg="#c7d5e0").pack(anchor="w")
             tk.Label(info_frame, text=f"Steam Price: {game['steam_price']} | Sale: {game['sale_price']}", font=("Segoe UI", 9), bg="#2a475e", fg="#c7d5e0").pack(anchor="w")
             tk.Label(info_frame, text=f"Status: {game.get('status', 'In Stock')} | Key: {game['key']}", font=("Segoe UI", 9), bg="#2a475e", fg="#b8b8b8").pack(anchor="w")
-    def open_add_game_window(self):
+
+            btn_frame = tk.Frame(frame, bg="#2a475e")
+            btn_frame.pack(side="right")
+            tk.Button(btn_frame, text="Edit", command=lambda i=index: self.open_add_game_window(i)).pack(padx=5, pady=2)
+            tk.Button(btn_frame, text="Delete", command=lambda i=index: self.delete_game(i)).pack(padx=5, pady=2)
+            display_index += 1
+    def open_add_game_window(self, game_index=None):
+        self.edit_index = game_index
         add_win = tk.Toplevel(self.root)
-        add_win.title("Add Game")
+        add_win.title("Edit Game" if game_index is not None else "Add Game")
         add_win.configure(bg="#1b2838")
         add_win.geometry("500x550")
 
@@ -137,10 +157,20 @@ class SteamKeyLibrary:
         self.key_var = tk.StringVar()
         tk.Entry(add_win, textvariable=self.key_var, width=40).pack(pady=(0, 15))
 
+        if game_index is not None:
+            game = self.games[game_index]
+            self.game_name_var.set(game.get("name", ""))
+            self.key_var.set(game.get("key", ""))
+            self.bundle_var.set(game.get("bundle", ""))
+            self.bundle_dropdown["values"] = [game.get("bundle", "")]
+            self.bundle_dropdown.current(0)
+
+        save_cmd = self.update_game if game_index is not None else self.save_game
+        btn_text = "💾 Update Game" if game_index is not None else "💾 Save Game"
         save_btn = tk.Button(
             add_win,
-            text="💾 Save Game",
-            command=self.save_game,
+            text=btn_text,
+            command=lambda win=add_win: save_cmd(win),
             relief="flat",
             bg="#1b2838",
             fg="#66C0F4",
@@ -215,7 +245,7 @@ class SteamKeyLibrary:
             print(f"[ERROR] Bundle scraping failed: {e}")
 
 
-    def save_game(self):
+    def save_game(self, window):
         name = self.game_name_var.get().strip()
         key = self.key_var.get().strip()
         bundle = self.bundle_var.get().strip()
@@ -238,6 +268,41 @@ class SteamKeyLibrary:
         self.games.append(game_data)
         self.save_data()
         self.refresh_games()
+        window.destroy()
+
+    def update_game(self, window):
+        if self.edit_index is None or self.edit_index >= len(self.games):
+            return
+
+        name = self.game_name_var.get().strip()
+        key = self.key_var.get().strip()
+        bundle = self.bundle_var.get().strip()
+
+        if not name or not key:
+            print("[INFO] Name and key are required.")
+            return
+
+        game_data = {
+            "name": name,
+            "bundle": bundle,
+            "bundle_date": bundle.split(" - ")[-1] if " - " in bundle else "",
+            "steam_price": self.games[self.edit_index].get("steam_price", "N/A"),
+            "sale_price": self.games[self.edit_index].get("sale_price", "N/A"),
+            "key": key,
+            "status": self.games[self.edit_index].get("status", "In Stock"),
+            "notes": self.games[self.edit_index].get("notes", ""),
+        }
+
+        self.games[self.edit_index] = game_data
+        self.save_data()
+        self.refresh_games()
+        window.destroy()
+
+    def delete_game(self, index):
+        if 0 <= index < len(self.games):
+            del self.games[index]
+            self.save_data()
+            self.refresh_games()
 
 if __name__ == "__main__":
     SteamKeyLibrary()
