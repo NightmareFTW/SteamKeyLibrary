@@ -3,17 +3,16 @@ from tkinter import ttk
 import os
 import json
 import re
+import requests
+from PIL import Image, ImageTk
+from bs4 import BeautifulSoup
+import urllib.parse
+
 
 class SteamKeyLibrary:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Steam Key Library")
-import requests
-from PIL import Image, ImageTk
-from bs4 import BeautifulSoup
-        import requests
-        from bs4 import BeautifulSoup
-        import urllib.parse
         self.root.configure(bg="#1b2838")
         self.root.geometry("1000x700")
 
