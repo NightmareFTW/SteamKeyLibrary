@@ -201,39 +201,37 @@ class SteamKeyLibrary:
             print(f"[ERROR] Steam search failed: {e}")
 
     def load_bundles(self):
-
-        game_name = self.search_results.get(tk.ACTIVE).split(" |")[0].strip()
-        if not game_name:
-            print("[ERROR] No game name provided.")
+        selection = self.search_results.get(tk.ACTIVE)
+        if not selection:
+            print("[ERROR] No game selected.")
             return
 
         try:
-            search_url = f"https://isthereanydeal.com/search/?q={urllib.parse.quote(game_name)}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            res = requests.get(search_url, headers=headers)
-            soup = BeautifulSoup(res.text, "html.parser")
-
-            first_result = soup.select_one("a.search__result__title")
-            if not first_result:
-                print("[ERROR] Game not found on ITAD.")
+            appid_match = re.search(r"AppID:\s*(\d+)", selection)
+            if not appid_match:
+                print("[ERROR] Could not determine AppID.")
                 return
+            appid = appid_match.group(1)
 
-            slug = first_result.get("href")  # e.g. /game/griftlands/
-            bundle_url = f"https://isthereanydeal.com{slug}bundles/"
-
-            res = requests.get(bundle_url, headers=headers)
+            url = f"https://barter.vg/steam/{appid}/"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            res = requests.get(url, headers=headers, timeout=10)
             soup = BeautifulSoup(res.text, "html.parser")
 
-            bundle_list = soup.select("li.bundle")
             bundles = []
-
-            for bundle in bundle_list:
-                name = bundle.select_one("strong")
-                date = bundle.select_one("span.date")
-                if name and "humble" in name.text.lower():
-                    bundle_name = name.text.strip()
-                    bundle_date = date.text.strip() if date else ""
-                    bundles.append(f"{bundle_name} - {bundle_date}")
+            for li in soup.select("#bundles li"):
+                name_elem = li.find("a")
+                src_elem = li.find("span", class_="source")
+                date_elem = li.find("time") or li.find("span", class_="date")
+                if not name_elem:
+                    continue
+                name = name_elem.get_text(strip=True)
+                source = src_elem.get_text(strip=True) if src_elem else ""
+                date = ""
+                if date_elem:
+                    date = date_elem.get("datetime", "")[:10] if date_elem.has_attr("datetime") else date_elem.get_text(strip=True)
+                if "humble" in source.lower() or "humble" in name.lower():
+                    bundles.append(f"{name} - {date}")
 
             if not bundles:
                 bundles = ["No Humble bundles found"]
