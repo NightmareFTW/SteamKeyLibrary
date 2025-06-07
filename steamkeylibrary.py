@@ -201,46 +201,89 @@ class SteamKeyLibrary:
             print(f"[ERROR] Steam search failed: {e}")
 
     def load_bundles(self):
+        """Fetch bundle history for the selected game.
+
+        This first tries the IsThereAnyDeal API if the ``ITAD_API_KEY``
+        environment variable is available. If the key is not set or the
+        request fails, it falls back to scraping bundle data from
+        isthereanydeal.com.
+        """
+
         selection = self.search_results.get(tk.ACTIVE)
         if not selection:
             print("[ERROR] No game selected.")
             return
 
-        try:
-            appid_match = re.search(r"AppID:\s*(\d+)", selection)
-            if not appid_match:
-                print("[ERROR] Could not determine AppID.")
-                return
-            appid = appid_match.group(1)
+        appid_match = re.search(r"AppID:\s*(\d+)", selection)
+        if not appid_match:
+            print("[ERROR] Could not determine AppID.")
+            return
+        appid = appid_match.group(1)
 
-            url = f"https://barter.vg/steam/{appid}/"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            res = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(res.text, "html.parser")
+        headers = {"User-Agent": "Mozilla/5.0"}
+        bundles = []
 
-            bundles = []
-            for li in soup.select("#bundles li"):
-                name_elem = li.find("a")
-                src_elem = li.find("span", class_="source")
-                date_elem = li.find("time") or li.find("span", class_="date")
-                if not name_elem:
-                    continue
-                name = name_elem.get_text(strip=True)
-                source = src_elem.get_text(strip=True) if src_elem else ""
-                date = ""
-                if date_elem:
-                    date = date_elem.get("datetime", "")[:10] if date_elem.has_attr("datetime") else date_elem.get_text(strip=True)
-                if "humble" in source.lower() or "humble" in name.lower():
-                    bundles.append(f"{name} - {date}")
+        api_key = os.environ.get("ITAD_API_KEY")
+        if api_key:
+            try:
+                plain_res = requests.get(
+                    "https://api.isthereanydeal.com/v02/game/plain/",
+                    params={"key": api_key, "ids": f"app/{appid}"},
+                    headers=headers,
+                    timeout=10,
+                )
+                plain_data = plain_res.json()
+                plain = plain_data["data"][f"app/{appid}"]["plain"]
 
-            if not bundles:
-                bundles = ["No Humble bundles found"]
+                bundles_res = requests.get(
+                    "https://api.isthereanydeal.com/v01/game/bundles/",
+                    params={"key": api_key, "plains": plain},
+                    headers=headers,
+                    timeout=10,
+                )
+                bundles_data = bundles_res.json()
+                for entry in bundles_data["data"].get(plain, {}).get("bundles", []):
+                    shop = entry.get("shop", "")
+                    if shop and "humble" not in shop.lower():
+                        continue
+                    title = entry.get("title", "Unknown bundle")
+                    date = entry.get("begins", "")
+                    date = date.split("T")[0] if date else ""
+                    bundles.append(f"{title} - {date}")
+            except Exception as api_exc:
+                print(f"[WARN] ITAD API failed: {api_exc}")
 
-            self.bundle_dropdown["values"] = bundles
-            self.bundle_dropdown.current(0)
+        if not bundles:
+            try:
+                search_url = f"https://isthereanydeal.com/search/?q={appid}"  # search by appid
+                res = requests.get(search_url, headers=headers, timeout=10)
+                soup = BeautifulSoup(res.text, "html.parser")
+                first_result = soup.select_one("a[href^='/game/']")
+                if not first_result:
+                    raise ValueError("Game not found on ITAD")
 
-        except Exception as e:
-            print(f"[ERROR] Bundle scraping failed: {e}")
+                slug = first_result.get("href").strip("/")  # e.g. game/griftlands
+                bundle_url = f"https://isthereanydeal.com/{slug}/bundles/"
+                res = requests.get(bundle_url, headers=headers, timeout=10)
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                for item in soup.select("li.bundle, div.bundle"):
+                    name_elem = item.find("strong") or item.find("a")
+                    date_elem = item.find(class_="date")
+                    if not name_elem:
+                        continue
+                    name = name_elem.get_text(strip=True)
+                    date = date_elem.get_text(strip=True) if date_elem else ""
+                    if "humble" in name.lower():
+                        bundles.append(f"{name} - {date}")
+            except Exception as scrape_exc:
+                print(f"[ERROR] Bundle scraping failed: {scrape_exc}")
+
+        if not bundles:
+            bundles = ["No Humble bundles found"]
+
+        self.bundle_dropdown["values"] = bundles
+        self.bundle_dropdown.current(0)
 
 
     def save_game(self, window):
