@@ -1,130 +1,112 @@
 # Steam Key Library
 
-> ⚠️ **Work in Progress** ⚠️  
-> This project is currently under active development and is not yet complete. Many features are missing, and you may encounter bugs or unexpected behavior. Use at your own discretion and expect frequent changes.
+> ⚠️ Work in Progress
 
-A simple Steam game key management tool for organizing and tracking your activation keys.
+A lightweight desktop app (Python + Tkinter) to organize your Steam keys, fetch game info from Steam, and suggest bundle origins via IsThereAnyDeal (ITAD) and optional fallback providers.
 
 ## Overview
 
-Steam Key Library helps you organize, track, and manage your Steam activation keys with a clean and straightforward interface.
+- Add a game by name with typeahead suggestions powered by a cached Steam app list
+- Fetch Steam header image and price info automatically
+- Suggest bundles via provider pipeline: ITAD (OpenAPI) → ITAD (legacy v02) → optional authorized feed
+- Persist your ITAD API key and country in-app (Settings menu)
+- Quick “Test Providers” dialog and “Validate ITAD Key” action
+- Manual entry flow if no bundle information is available
 
-## Key Features
+## Requirements
 
-- **Secure Key Storage**: Encrypted storage for your activation keys
-- **Usage Tracking**: Track which keys have been activated
-- **Search & Filter**: Find keys quickly with search functionality
-- **Collection Management**: Organize keys with custom categories
-- **Data Export**: Export your library for backup purposes
-- **Simple Interface**: Clean, easy-to-use design
+- Python 3.10+ (Windows/macOS/Linux)
+- pip
 
-## System Requirements
+Python packages used:
+- `requests` (HTTP)
+- `Pillow` (images)
 
-- Node.js 16.0 or higher
-- npm 8.0 or higher
-- Modern web browser
+## Setup
 
-## Installation
+```powershell
+# 1) Create and activate a virtual environment (recommended)
+python -m venv .venv
+. .venv\Scripts\Activate.ps1
 
-```bash
-# Clone the repository
-git clone https://github.com/NightmareFTW/SteamKeyLibrary.git
+# 2) Install dependencies
+pip install requests Pillow
 
-# Navigate to project directory
-cd SteamKeyLibrary
-
-# Install dependencies
-npm install
-
-# Start the application
-npm start
+# 3) Run the app
+python steamkeylibrary.py
 ```
 
-## Quick Start Guide
+On first launch, the app will download the Steam app list and cache it locally.
 
-1. **Launch**: Start the application
-2. **Add Keys**: Input your Steam activation keys
-3. **Organize**: Create categories for your games
-4. **Track**: Mark keys as used when activated
-5. **Search**: Use filters to find specific games
+## Using the app
+
+1) Click “Add Game”
+- Start typing a title; pick one from the suggestions
+- The app fetches official title/price/image from Steam
+2) If bundles are found via providers, select one; otherwise you can proceed with manual entry
+3) Your game is saved to `games.json`
 
 ## Configuration
 
-Create a `.env` file in the root directory:
+### ITAD (IsThereAnyDeal)
 
-```env
-DATABASE_URL=sqlite://./steamkeys.db
-ENCRYPTION_KEY=your_secure_encryption_key
-PORT=3000
-```
+You need an API key to use the ITAD provider:
 
-## ITAD API configuration
-
-This app integrates with IsThereAnyDeal (ITAD) to look up bundle history. You'll need an API key:
-
-- Create an API key in your ITAD account
-- Set the environment variable `ITAD_API_KEY` before running the app
-
-Example (Windows PowerShell, current session only):
+- In the app: Settings → “Set ITAD API Key…” (stored in `settings.json`)
+- Or via environment variable before running:
 
 ```powershell
 $env:ITAD_API_KEY = "<your_itad_api_key>"
 ```
 
-Notes:
-
-- If `ITAD_API_KEY` isn't set or the key is invalid/expired, ITAD lookups will fail and bundles may not be shown.
-- The app uses IsThereAnyDeal's public API (OpenAPI): it looks up a game via `GET /games/lookup/v1` (by Steam appid or title) and fetches bundles via `GET /games/bundles/v2`. A custom User-Agent is included to comply with API requirements.
-
-Optional: set your country (affects pricing/availability on some endpoints):
+Optional: set your country for ITAD (ISO 3166‑1 alpha‑2, e.g., US, PT):
 
 ```powershell
-$env:ITAD_COUNTRY = "PT"  # defaults to US if not set
+$env:ITAD_COUNTRY = "PT"
 ```
 
-## Optional providers (fallback)
+Endpoints used (OpenAPI):
+- `GET https://api.isthereanydeal.com/games/lookup/v1` (by Steam appid or title) → returns ITAD Game ID
+- `GET https://api.isthereanydeal.com/games/bundles/v2` (by ITAD Game ID) → returns bundles
 
-You can optionally configure an authorized feed for bundle history as a fallback to ITAD (e.g., Barter.vg feeds). This app will only call a fallback if you explicitly configure it.
+Notes and troubleshooting:
+- If your key is new, it may need activation/approval and/or a short propagation period. Until then, ITAD can reply `403 Invalid or expired api key`.
+- Use Settings → “Validate ITAD Key…” to run a quick lookup test and see the server’s reason if it fails.
+- The Providers bar shows “ITAD key: Invalid — <reason>” when the server rejects the key.
 
-- Set `BARTER_BUNDLES_URL` to a provider feed template. It may include `{appid}` and/or `{title}` placeholders.
+### Optional fallback provider (authorized feed)
 
-Example (PowerShell):
+You can configure a custom, authorized feed (e.g., Barter.vg API/feeds you’re allowed to use). The app will only call a fallback if you explicitly set it.
+
+Set these environment variables if desired:
 
 ```powershell
-$env:BARTER_BUNDLES_URL = "https://example.com/your-authorized-feed?appid={appid}&format=json"
-# Optional auth header, if your feed requires it
+$env:BARTER_BUNDLES_URL = "https://example.com/feeds/bundles?appid={appid}&format=json"
+# Optional auth header if your feed requires it
 $env:BARTER_AUTH_HEADER = "Bearer <token>"
 ```
 
-Restrictions and notes:
+Placeholders supported in the URL:
+- `{appid}` — Steam appid
+- `{title}` — URL‑encoded title
 
-- Respect the provider's Terms of Service. This app will not scrape websites; it will only use feeds or APIs you configure.
-- Fallback results are cached locally for 12 hours to reduce load and avoid rate limits.
-- The bundle selection popup will tag each entry with its source, e.g., "[ITAD]" or "[Barter]".
+Toggle the fallback in the UI (“Enable fallback” in the Providers bar).
 
-## Contributing
+## Data files
 
-Contributions are welcome! Please:
+- `games.json` — your saved library
+- `steam_applist.json` — cached Steam app list (24h TTL)
+- `itad_cache.json` — cached provider results (12h TTL)
+- `settings.json` — app settings (ITAD key, country)
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
+## Privacy and legal
 
-## Security
-
-- Local encryption for key storage
-- No external data transmission
-- Secure local database
+- No scraping is performed. Only configured APIs/feeds are called.
+- Respect each provider’s terms of service.
+- Use only legitimate activation keys and comply with Steam’s terms.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE)
 
-## Legal Notice
-
-**Important**: This tool is for personal use only. Please comply with Steam's Terms of Service and only use legitimate activation keys.
-
----
 © 2024 Steam Key Library
