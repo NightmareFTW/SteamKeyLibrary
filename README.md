@@ -83,5 +83,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Important**: This tool is for personal use only. Please comply with Steam's Terms of Service and only use legitimate activation keys.
 
 ---
-
 © 2024 Steam Key Library
