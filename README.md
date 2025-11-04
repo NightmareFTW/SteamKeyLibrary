@@ -58,6 +58,50 @@ ENCRYPTION_KEY=your_secure_encryption_key
 PORT=3000
 ```
 
+## ITAD API configuration
+
+This app integrates with IsThereAnyDeal (ITAD) to look up bundle history. You'll need an API key:
+
+- Create an API key in your ITAD account
+- Set the environment variable `ITAD_API_KEY` before running the app
+
+Example (Windows PowerShell, current session only):
+
+```powershell
+$env:ITAD_API_KEY = "<your_itad_api_key>"
+```
+
+Notes:
+
+- If `ITAD_API_KEY` isn't set or the key is invalid/expired, ITAD lookups will fail and bundles may not be shown.
+- The app uses IsThereAnyDeal's public API (OpenAPI): it looks up a game via `GET /games/lookup/v1` (by Steam appid or title) and fetches bundles via `GET /games/bundles/v2`. A custom User-Agent is included to comply with API requirements.
+
+Optional: set your country (affects pricing/availability on some endpoints):
+
+```powershell
+$env:ITAD_COUNTRY = "PT"  # defaults to US if not set
+```
+
+## Optional providers (fallback)
+
+You can optionally configure an authorized feed for bundle history as a fallback to ITAD (e.g., Barter.vg feeds). This app will only call a fallback if you explicitly configure it.
+
+- Set `BARTER_BUNDLES_URL` to a provider feed template. It may include `{appid}` and/or `{title}` placeholders.
+
+Example (PowerShell):
+
+```powershell
+$env:BARTER_BUNDLES_URL = "https://example.com/your-authorized-feed?appid={appid}&format=json"
+# Optional auth header, if your feed requires it
+$env:BARTER_AUTH_HEADER = "Bearer <token>"
+```
+
+Restrictions and notes:
+
+- Respect the provider's Terms of Service. This app will not scrape websites; it will only use feeds or APIs you configure.
+- Fallback results are cached locally for 12 hours to reduce load and avoid rate limits.
+- The bundle selection popup will tag each entry with its source, e.g., "[ITAD]" or "[Barter]".
+
 ## Contributing
 
 Contributions are welcome! Please:
