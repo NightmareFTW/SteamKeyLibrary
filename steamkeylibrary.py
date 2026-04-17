@@ -90,9 +90,9 @@ TRANSLATIONS = {
         "cloud_save_failed": "Failed to upload cloud save.",
         "cloud_load_ok": "Cloud save loaded successfully.",
         "cloud_save_ok": "Cloud save uploaded successfully.",
-        "cloud_jsonbin_tutorial_btn": "Jsonbin Tutorial",
-        "cloud_jsonbin_tutorial_title": "Jsonbin.io Setup",
-        "cloud_jsonbin_tutorial_body": "1. Create an account at jsonbin.io and create a new bin.\n\n2. Save valid JSON, for example: {\"games\": []}\n(Do not use comments like // ...).\n\n3. Copy your Bin ID and set Cloud Save URL to:\nhttps://api.jsonbin.io/v3/b/YOUR_BIN_ID\n\n4. Copy your Master Key (or Access Key) from API Access.\n\n5. In Cloud Auth Header, paste one of these:\n- X-Master-Key <your_key>\n- X-Access-Key <your_key>\n- or just the key itself.\n\n6. Use 'Upload to Cloud' and then 'Load from Cloud' to verify sync.",
+        "cloud_jsonbin_tutorial_btn": "Cloud Setup Guide",
+        "cloud_jsonbin_tutorial_title": "Cloud Save Setup",
+        "cloud_jsonbin_tutorial_body": "=== OPTION A: GitHub Gist (Recommended — Free, No Size Limit) ===\n\n1. Go to https://gist.github.com and sign in to your GitHub account.\n\n2. Create a new Gist:\n   - Description: SteamKeyLibrary\n   - Filename: games.json\n   - Content: {\"games\": []}\n   - Set visibility to Secret (private but accessible via API).\n\n3. Click 'Create secret gist'.\n\n4. Copy the Gist ID from the URL:\n   https://gist.github.com/YOUR_USERNAME/GIST_ID\n   (the long alphanumeric string at the end)\n\n5. Set Cloud Save URL to:\n   https://api.github.com/gists/GIST_ID\n\n6. Create a GitHub Personal Access Token:\n   - Go to: GitHub -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)\n   - Click 'Generate new token (classic)'\n   - Give it a name (e.g. SteamKeyLibrary)\n   - Enable the 'gist' scope only\n   - Click 'Generate token' and copy it immediately\n\n7. In Cloud Auth Header, paste:\n   Bearer ghp_YOUR_TOKEN\n\n8. Use 'Upload to Cloud' then 'Load from Cloud' to verify sync.\n\n\n=== OPTION B: JSONBin.io (Free tier has ~128KB limit) ===\n\n1. Create an account at jsonbin.io and create a new bin.\n2. Save valid JSON: {\"games\": []}\n3. Set Cloud Save URL to: https://api.jsonbin.io/v3/b/YOUR_BIN_ID\n4. In Cloud Auth Header, paste your Master Key or Access Key.\n5. Use 'Upload to Cloud' and then 'Load from Cloud' to verify sync.",
         "copy_text": "Copy",
         "close": "Close",
         "itad_key": "ITAD API Key",
@@ -197,9 +197,9 @@ TRANSLATIONS = {
         "cloud_save_failed": "Falha ao enviar save para a cloud.",
         "cloud_load_ok": "Save cloud carregado com sucesso.",
         "cloud_save_ok": "Save cloud enviado com sucesso.",
-        "cloud_jsonbin_tutorial_btn": "Tutorial Jsonbin",
-        "cloud_jsonbin_tutorial_title": "Configuração Jsonbin.io",
-        "cloud_jsonbin_tutorial_body": "1. Cria conta em jsonbin.io e cria um novo bin.\n\n2. Guarda JSON válido, por exemplo: {\"games\": []}\n(Não uses comentários como // ...).\n\n3. Copia o Bin ID e define o Link do save cloud como:\nhttps://api.jsonbin.io/v3/b/SEU_BIN_ID\n\n4. Copia a Master Key (ou Access Key) em API Access.\n\n5. Em Header de autenticação cloud, usa uma destas formas:\n- X-Master-Key <a_tua_key>\n- X-Access-Key <a_tua_key>\n- ou apenas a key.\n\n6. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar a sincronização.",
+        "cloud_jsonbin_tutorial_btn": "Guia de Configuração Cloud",
+        "cloud_jsonbin_tutorial_title": "Configuração do Save Cloud",
+        "cloud_jsonbin_tutorial_body": "=== OPÇÃO A: GitHub Gist (Recomendado — Gratuito, Sem Limite de Tamanho) ===\n\n1. Vai a https://gist.github.com e entra na tua conta GitHub.\n\n2. Cria um novo Gist:\n   - Descrição: SteamKeyLibrary\n   - Nome do ficheiro: games.json\n   - Conteúdo: {\"games\": []}\n   - Define a visibilidade como Secret (privado mas acessível via API).\n\n3. Clica em 'Create secret gist'.\n\n4. Copia o Gist ID da URL:\n   https://gist.github.com/SEU_USERNAME/GIST_ID\n   (a sequência alfanumérica longa no final)\n\n5. Define o Link do save cloud como:\n   https://api.github.com/gists/GIST_ID\n\n6. Cria um Personal Access Token do GitHub:\n   - Vai a: GitHub -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)\n   - Clica em 'Generate new token (classic)'\n   - Dá-lhe um nome (ex.: SteamKeyLibrary)\n   - Activa apenas o scope 'gist'\n   - Clica em 'Generate token' e copia-o imediatamente\n\n7. Em Header de autenticação cloud, escreve:\n   Bearer ghp_O_TEU_TOKEN\n\n8. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar a sincronização.\n\n\n=== OPÇÃO B: JSONBin.io (tier gratuito tem limite ~128KB) ===\n\n1. Cria conta em jsonbin.io e cria um novo bin.\n2. Guarda JSON válido: {\"games\": []}\n3. Define o Link do save cloud como: https://api.jsonbin.io/v3/b/SEU_BIN_ID\n4. Em Header de autenticação cloud, coloca a tua Master Key ou Access Key.\n5. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar.",
         "copy_text": "Copiar",
         "close": "Fechar",
         "itad_key": "Chave API ITAD",
@@ -519,6 +519,30 @@ def cloud_download_games(url: str, auth_header: str = ""):
                 return None, f"HTTP {r.status_code}: {_extract_reason(r)}"
             return _parse_cloud_games_payload(r)
 
+        if _is_github_gist_url(url):
+            gist_id = _extract_gist_id(url)
+            if not gist_id:
+                return None, "Invalid GitHub Gist URL. Expected: https://api.github.com/gists/GIST_ID"
+            gh_headers = dict(HTTP_HEADERS)
+            gh_headers["Accept"] = "application/vnd.github+json"
+            gh_headers.update(_github_gist_auth_header(auth_header))
+            r = requests.get(f"https://api.github.com/gists/{gist_id}", headers=gh_headers, timeout=25)
+            if r.status_code != 200:
+                return None, f"GitHub Gist HTTP {r.status_code}: {_extract_reason(r)}"
+            gist_data = r.json()
+            files = gist_data.get("files", {})
+            if not files:
+                return None, "Gist has no files."
+            # Look for games.json first, otherwise take the first file.
+            file_key = "games.json" if "games.json" in files else next(iter(files))
+            raw_url = files[file_key].get("raw_url", "")
+            if not raw_url:
+                return None, "Could not find raw_url in Gist file."
+            r2 = requests.get(raw_url, timeout=25)
+            if r2.status_code != 200:
+                return None, f"Failed to fetch Gist raw content: HTTP {r2.status_code}"
+            return _parse_cloud_games_payload(r2)
+
         drive_file_id = _extract_google_drive_file_id(url)
         if drive_file_id:
             # Google Drive share links are read-only by URL; convert to direct content URL.
@@ -564,6 +588,26 @@ def cloud_upload_games(url: str, auth_header: str, games: list):
             if r.status_code in (200, 201, 202, 204):
                 return True, ""
             return False, f"HTTP {r.status_code}: {_extract_reason(r)}"
+
+        if _is_github_gist_url(url):
+            gist_id = _extract_gist_id(url)
+            if not gist_id:
+                return False, "Invalid GitHub Gist URL. Expected: https://api.github.com/gists/GIST_ID"
+            gh_headers = dict(HTTP_HEADERS)
+            gh_headers["Accept"] = "application/vnd.github+json"
+            gh_headers["Content-Type"] = "application/json"
+            gh_headers.update(_github_gist_auth_header(auth_header))
+            content = json.dumps(payload, ensure_ascii=False)
+            gist_payload = {"files": {"games.json": {"content": content}}}
+            r = requests.patch(
+                f"https://api.github.com/gists/{gist_id}",
+                json=gist_payload,
+                headers=gh_headers,
+                timeout=25,
+            )
+            if r.status_code in (200, 201, 202, 204):
+                return True, ""
+            return False, f"GitHub Gist HTTP {r.status_code}: {_extract_reason(r)}"
 
         drive_file_id = _extract_google_drive_file_id(url)
         if drive_file_id:
@@ -618,6 +662,34 @@ def _extract_google_drive_file_id(url: str) -> str:
 def _is_jsonbin_url(url: str) -> bool:
     text = _safe_str(url).strip().lower()
     return "api.jsonbin.io" in text and "/v3/b/" in text
+
+
+def _is_github_gist_url(url: str) -> bool:
+    text = _safe_str(url).strip().lower()
+    return "api.github.com/gists/" in text
+
+
+def _extract_gist_id(url: str) -> str:
+    """Extract Gist ID from https://api.github.com/gists/<id> URLs."""
+    text = _safe_str(url).strip()
+    idx = text.lower().find("api.github.com/gists/")
+    if idx == -1:
+        return ""
+    after = text[idx + len("api.github.com/gists/"):]
+    gist_id = after.split("/")[0].split("?")[0].strip()
+    return gist_id
+
+
+def _github_gist_auth_header(auth_header: str) -> dict:
+    """Build GitHub API auth headers from the stored auth header string."""
+    h = {}
+    raw = _safe_str(auth_header).strip()
+    if raw:
+        if raw.lower().startswith("bearer ") or raw.lower().startswith("token "):
+            h["Authorization"] = raw
+        else:
+            h["Authorization"] = f"Bearer {raw}"
+    return h
 
 
 def _jsonbin_download_url(url: str) -> str:
