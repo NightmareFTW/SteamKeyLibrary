@@ -12,7 +12,7 @@ echo Using Python: %PY%
 "%PY%" -m pip install --upgrade pyinstaller cryptography
 if errorlevel 1 goto :error
 
-"%PY%" -m PyInstaller --noconfirm --clean --windowed --onefile --name "SteamKeyLibrary" --collect-all cryptography "steamkeylibrary.py"
+"%PY%" -m PyInstaller --noconfirm SteamKeyLibrary.spec
 if errorlevel 1 goto :error
 
 echo.
