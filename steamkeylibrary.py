@@ -91,6 +91,8 @@ TRANSLATIONS = {
         "cloud_jsonbin_tutorial_btn": "Jsonbin Tutorial",
         "cloud_jsonbin_tutorial_title": "Jsonbin.io Setup",
         "cloud_jsonbin_tutorial_body": "1. Create an account at jsonbin.io and create a new bin.\n\n2. Save valid JSON, for example: {\"games\": []}\n(Do not use comments like // ...).\n\n3. Copy your Bin ID and set Cloud Save URL to:\nhttps://api.jsonbin.io/v3/b/YOUR_BIN_ID\n\n4. Copy your Master Key (or Access Key) from API Access.\n\n5. In Cloud Auth Header, paste one of these:\n- X-Master-Key <your_key>\n- X-Access-Key <your_key>\n- or just the key itself.\n\n6. Use 'Upload to Cloud' and then 'Load from Cloud' to verify sync.",
+        "copy_text": "Copy",
+        "close": "Close",
         "itad_key": "ITAD API Key",
         "itad_key_info": "API key required for bundle and price data. Register your app at isthereanydeal.com/apps/my/ to get a key.",
         "itad_country": "ITAD Country",
@@ -193,6 +195,8 @@ TRANSLATIONS = {
         "cloud_jsonbin_tutorial_btn": "Tutorial Jsonbin",
         "cloud_jsonbin_tutorial_title": "Configuração Jsonbin.io",
         "cloud_jsonbin_tutorial_body": "1. Cria conta em jsonbin.io e cria um novo bin.\n\n2. Guarda JSON válido, por exemplo: {\"games\": []}\n(Não uses comentários como // ...).\n\n3. Copia o Bin ID e define o Link do save cloud como:\nhttps://api.jsonbin.io/v3/b/SEU_BIN_ID\n\n4. Copia a Master Key (ou Access Key) em API Access.\n\n5. Em Header de autenticação cloud, usa uma destas formas:\n- X-Master-Key <a_tua_key>\n- X-Access-Key <a_tua_key>\n- ou apenas a key.\n\n6. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar a sincronização.",
+        "copy_text": "Copiar",
+        "close": "Fechar",
         "itad_key": "Chave API ITAD",
         "itad_key_info": "Chave API necessária para dados de bundles e preços. Regista a tua app em isthereanydeal.com/apps/my/ para obter uma chave.",
         "itad_country": "País ITAD",
@@ -1798,7 +1802,68 @@ class SteamKeyApp(tk.Tk):
             messagebox.showerror(self.t("error"), f"Network error: {exc}")
 
     def show_jsonbin_tutorial(self):
-        messagebox.showinfo(self.t("cloud_jsonbin_tutorial_title"), self.t("cloud_jsonbin_tutorial_body"))
+        dlg = tk.Toplevel(self)
+        dlg.title(self.t("cloud_jsonbin_tutorial_title"))
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("720x420")
+        dlg.minsize(560, 320)
+        dlg.configure(bg=self.current_palette["surface"])
+
+        wrap = ttk.Frame(dlg, style="Surface.TFrame", padding=12)
+        wrap.pack(fill="both", expand=True)
+
+        text_frame = ttk.Frame(wrap, style="Surface.TFrame")
+        text_frame.pack(fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical")
+        tutorial_text = tk.Text(
+            text_frame,
+            wrap="word",
+            yscrollcommand=scrollbar.set,
+            bg=self.current_palette["surface_alt"],
+            fg=self.current_palette["text"],
+            insertbackground=self.current_palette["text"],
+            selectbackground=self.current_palette["accent"],
+            selectforeground="#ffffff",
+            relief="flat",
+            borderwidth=0,
+            padx=10,
+            pady=10,
+        )
+        scrollbar.config(command=tutorial_text.yview)
+        tutorial_text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        tutorial_body = self.t("cloud_jsonbin_tutorial_body")
+        tutorial_text.insert("1.0", tutorial_body)
+        tutorial_text.config(state="disabled")
+
+        def copy_tutorial(event=None):
+            try:
+                text_to_copy = tutorial_text.get("sel.first", "sel.last")
+            except tk.TclError:
+                text_to_copy = tutorial_body
+            self.clipboard_clear()
+            self.clipboard_append(text_to_copy)
+            return "break"
+
+        def select_all(event=None):
+            tutorial_text.tag_add("sel", "1.0", "end-1c")
+            tutorial_text.mark_set("insert", "1.0")
+            tutorial_text.see("insert")
+            return "break"
+
+        tutorial_text.bind("<Control-c>", copy_tutorial)
+        tutorial_text.bind("<Control-C>", copy_tutorial)
+        tutorial_text.bind("<Control-a>", select_all)
+        tutorial_text.bind("<Control-A>", select_all)
+        tutorial_text.focus_set()
+
+        actions = ttk.Frame(wrap, style="Surface.TFrame")
+        actions.pack(fill="x", pady=(12, 0))
+        ttk.Button(actions, text=self.t("copy_text"), command=copy_tutorial).pack(side="left")
+        ttk.Button(actions, text=self.t("close"), command=dlg.destroy).pack(side="right")
 
     def _add_help_icon(self, parent, row, col, text):
         help_lbl = ttk.Label(parent, text="(?)", style="Help.TLabel", cursor="hand2")
