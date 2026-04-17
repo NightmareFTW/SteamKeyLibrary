@@ -79,6 +79,8 @@ TRANSLATIONS = {
         "save_mode_local": "Local only",
         "save_mode_cloud": "Cloud only",
         "save_mode_both": "Local and Cloud",
+        "autosave_interval": "Auto-save interval",
+        "autosave_minutes": "minutes",
         "cloud_url": "Cloud Save URL",
         "cloud_auth": "Cloud Auth Header",
         "cloud_download": "Load from Cloud",
@@ -143,6 +145,7 @@ TRANSLATIONS = {
         "tooltip_fallback_url": "URL to your authorised fallback JSON feed.\nSupported placeholders: {appid} and {title}.",
         "tooltip_fallback_auth": "Optional HTTP Authorization header for the fallback feed.\nExamples:\nBearer YOUR_TOKEN\nApiKey YOUR_KEY",
         "tooltip_save_mode": "local – save only on this PC\ncloud – save only to cloud URL\nboth – save locally and to cloud",
+        "tooltip_autosave": "Automatic save interval while the app is open.\nDefault is 5 minutes.",
     },
     "pt-PT": {
         "title": "Steam Key Library",
@@ -183,6 +186,8 @@ TRANSLATIONS = {
         "save_mode_local": "Apenas local",
         "save_mode_cloud": "Apenas cloud",
         "save_mode_both": "Local e cloud",
+        "autosave_interval": "Intervalo de auto-save",
+        "autosave_minutes": "minutos",
         "cloud_url": "Link do save cloud",
         "cloud_auth": "Header de autenticação cloud",
         "cloud_download": "Carregar da cloud",
@@ -247,6 +252,7 @@ TRANSLATIONS = {
         "tooltip_fallback_url": "URL do teu feed JSON fallback autorizado.\nPlaceholders suportados: {appid} e {title}.",
         "tooltip_fallback_auth": "Header HTTP Authorization opcional para o feed fallback.\nExemplos:\nBearer TOKEN\nApiKey CHAVE",
         "tooltip_save_mode": "local – guarda só neste PC\ncloud – guarda só no URL cloud\nboth – guarda localmente e na cloud",
+        "tooltip_autosave": "Intervalo do auto-save enquanto a app esta aberta.\nPor defeito sao 5 minutos.",
     },
 }
 
@@ -440,6 +446,7 @@ def default_settings():
         "theme": "steam",
         "display_currency": os.getenv("DISPLAY_CURRENCY", "EUR"),
         "save_mode": os.getenv("SAVE_MODE", "local"),
+        "autosave_minutes": 5,
         "cloud_save_url": os.getenv("CLOUD_SAVE_URL", ""),
         "cloud_auth_header": os.getenv("CLOUD_AUTH_HEADER", ""),
         "ITAD_API_KEY": os.getenv("ITAD_API_KEY", ""),
@@ -463,6 +470,11 @@ def load_settings():
         cfg["display_currency"] = "EUR"
     if _safe_str(cfg.get("save_mode", "local")) not in ("local", "cloud", "both"):
         cfg["save_mode"] = "local"
+    try:
+        minutes = int(cfg.get("autosave_minutes", 5))
+    except Exception:
+        minutes = 5
+    cfg["autosave_minutes"] = min(240, max(1, minutes))
     return cfg
 
 
@@ -884,6 +896,36 @@ def _to_date(value):
     return s[:10]
 
 
+def _infer_drm_platform(drm_hint: str = "", platform_hint: str = "", bundle_name: str = "", url: str = "") -> str:
+    text = " ".join([_safe_str(drm_hint), _safe_str(platform_hint), _safe_str(bundle_name), _safe_str(url)]).lower()
+    if not text.strip():
+        return ""
+
+    checks = [
+        ("steam", "Steam"),
+        ("gog", "GOG"),
+        ("ubisoft", "Ubisoft Connect"),
+        ("uplay", "Ubisoft Connect"),
+        ("epic", "Epic Games"),
+        ("origin", "EA App"),
+        ("ea app", "EA App"),
+        ("electronic arts", "EA App"),
+        ("battle.net", "Battle.net"),
+        ("battlenet", "Battle.net"),
+        ("blizzard", "Battle.net"),
+        ("rockstar", "Rockstar Games Launcher"),
+        ("microsoft", "Microsoft Store"),
+        ("xbox", "Xbox / Microsoft Store"),
+    ]
+    for needle, label in checks:
+        if needle in text:
+            return label
+
+    # Keep known provider labels when activation platform is not explicitly available.
+    raw = _safe_str(drm_hint).strip() or _safe_str(platform_hint).strip()
+    return raw
+
+
 def normalize_bundle_item(raw: dict, source: str):
     # ITAD /games/bundles/v2 schema:
     #   id, title, page (shop info), url, details, publish (ISO str), expiry (ISO str), tiers
@@ -903,9 +945,12 @@ def normalize_bundle_item(raw: dict, source: str):
         # defensive: handle old/inconsistent shapes
         publish_raw = publish_raw.get("start") or publish_raw.get("date") or publish_raw.get("published") or ""
     date = _to_date(publish_raw)
-    # For bundle platforms (Humble, Fanatical, etc.) DRM info is not provided by ITAD.
-    # Use the platform name itself as the DRM hint, or fall back to "Steam".
-    drm = _safe_str(raw.get("drm") or raw.get("activation") or platform or "Steam")
+    drm = _infer_drm_platform(
+        _safe_str(raw.get("drm") or raw.get("activation") or ""),
+        platform,
+        title,
+        _safe_str(raw.get("url") or raw.get("details") or ""),
+    )
     return {
         "bundle_choice": f"{title} ({date})" if date else title,
         "platform": platform or source,
@@ -1281,6 +1326,15 @@ def ensure_game_defaults(game: dict):
     # migrate legacy single "key" field to the new "keys" list
     if out["key"] and not out["keys"]:
         out["keys"] = [{"code": out["key"], "key_status": "stock"}]
+    current_drm = _safe_str(out.get("drm", "")).strip()
+    inferred = _infer_drm_platform(
+        current_drm,
+        _safe_str(out.get("platform", "")),
+        _safe_str(out.get("bundle_name", "")),
+        "",
+    )
+    if not current_drm and inferred:
+        out["drm"] = inferred
     return out
 
 
@@ -1299,6 +1353,8 @@ class SteamKeyApp(tk.Tk):
         self.oauth_code_verifier = ""
         self.oauth_state = ""
         self.oauth_url = ""
+        self._autosave_job = None
+        self._is_closing = False
 
         self.style = ttk.Style(self)
         self._apply_theme(self.settings.get("theme", "steam"))
@@ -1311,6 +1367,8 @@ class SteamKeyApp(tk.Tk):
         self._refresh_tree()
         self._load_applist_async()
         self._sync_cloud_on_startup()
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
+        self._schedule_autosave()
 
     def _apply_app_icon(self):
         """Apply a custom icon for the title bar and Windows taskbar when available."""
@@ -1382,6 +1440,66 @@ class SteamKeyApp(tk.Tk):
             ok, err = cloud_upload_games(cloud_url, cloud_auth, self.games)
             if not ok and show_errors:
                 messagebox.showwarning(self.t("warning"), f"{self.t('cloud_save_failed')}\n\n{err}")
+
+    def _autosave_minutes(self):
+        try:
+            minutes = int(self.settings.get("autosave_minutes", 5))
+        except Exception:
+            minutes = 5
+        return min(240, max(1, minutes))
+
+    def _schedule_autosave(self):
+        self._cancel_autosave()
+        self._autosave_job = self.after(self._autosave_minutes() * 60 * 1000, self._autosave_tick)
+
+    def _cancel_autosave(self):
+        if self._autosave_job is not None:
+            try:
+                self.after_cancel(self._autosave_job)
+            except Exception:
+                pass
+            self._autosave_job = None
+
+    def _sync_selected_game_from_editor(self):
+        if self.selected_index is None:
+            return
+        if not (0 <= self.selected_index < len(self.games)):
+            return
+        game = ensure_game_defaults(self.games[self.selected_index])
+        game["bundle_choice"] = self.var_bundle_choice.get()
+        game["platform"] = self.var_platform.get()
+        game["bundle_name"] = self.var_bundle_name.get()
+        game["drm"] = _infer_drm_platform(self.var_drm.get(), game.get("platform", ""), game.get("bundle_name", ""), "")
+        game["bundle_date"] = self.var_bundle_date.get()
+        game["note"] = self.var_note.get()
+        game["keys"] = self._collect_keys()
+        game["status"] = self._status_from_keys(game["keys"])
+        self.games[self.selected_index] = game
+
+    def _autosave_tick(self):
+        if self._is_closing:
+            return
+        try:
+            self._sync_selected_game_from_editor()
+            self._persist_games(show_errors=False)
+            _log(f"Auto-save completed ({self._autosave_minutes()} min interval).")
+        except Exception as exc:
+            _log(f"Auto-save failed: {exc}")
+        finally:
+            if not self._is_closing:
+                self._schedule_autosave()
+
+    def _on_app_close(self):
+        if self._is_closing:
+            return
+        self._is_closing = True
+        self._cancel_autosave()
+        try:
+            self._sync_selected_game_from_editor()
+            self._persist_games(show_errors=False)
+        except Exception as exc:
+            _log(f"Save on close failed: {exc}")
+        self.destroy()
 
     def cloud_upload_now(self):
         cloud_url = _safe_str(self.ent_cloud_url.get() if hasattr(self, "ent_cloud_url") else self.settings.get("cloud_save_url", "")).strip()
@@ -1765,20 +1883,27 @@ class SteamKeyApp(tk.Tk):
         self._add_help_icon(panel, 14, 2, lambda: self.t("tooltip_save_mode"))
         self.cmb_save_mode.bind("<<ComboboxSelected>>", lambda _e: self._on_save_mode_changed())
 
+        self.lbl_autosave = ttk.Label(panel, text=self.t("autosave_interval"), style="Surface.TLabel")
+        self.lbl_autosave.grid(row=15, column=0, sticky="w", pady=6)
+        self.cmb_autosave = ttk.Combobox(panel, state="readonly", values=["1", "2", "3", "5", "10", "15", "30", "60"])
+        self.cmb_autosave.set(str(self._autosave_minutes()))
+        self.cmb_autosave.grid(row=15, column=1, sticky="w", pady=6)
+        self._add_help_icon(panel, 15, 2, lambda: self.t("tooltip_autosave"))
+
         self.lbl_cloud_url = ttk.Label(panel, text=self.t("cloud_url"), style="Surface.TLabel")
-        self.lbl_cloud_url.grid(row=15, column=0, sticky="w", pady=6)
+        self.lbl_cloud_url.grid(row=16, column=0, sticky="w", pady=6)
         self.ent_cloud_url = ttk.Entry(panel)
         self.ent_cloud_url.insert(0, self.settings.get("cloud_save_url", ""))
-        self.ent_cloud_url.grid(row=15, column=1, sticky="ew", pady=6)
+        self.ent_cloud_url.grid(row=16, column=1, sticky="ew", pady=6)
 
         self.lbl_cloud_auth = ttk.Label(panel, text=self.t("cloud_auth"), style="Surface.TLabel")
-        self.lbl_cloud_auth.grid(row=16, column=0, sticky="w", pady=6)
+        self.lbl_cloud_auth.grid(row=17, column=0, sticky="w", pady=6)
         self.ent_cloud_auth = ttk.Entry(panel)
         self.ent_cloud_auth.insert(0, self.settings.get("cloud_auth_header", ""))
-        self.ent_cloud_auth.grid(row=16, column=1, sticky="ew", pady=6)
+        self.ent_cloud_auth.grid(row=17, column=1, sticky="ew", pady=6)
 
         self.frm_cloud_actions = ttk.Frame(panel, style="Surface.TFrame")
-        self.frm_cloud_actions.grid(row=17, column=1, sticky="w", pady=(4, 0))
+        self.frm_cloud_actions.grid(row=18, column=1, sticky="w", pady=(4, 0))
         self.btn_cloud_download = ttk.Button(self.frm_cloud_actions, text=self.t("cloud_download"), command=self.cloud_download_now)
         self.btn_cloud_download.pack(side="left", padx=(0, 8))
         self.btn_cloud_upload = ttk.Button(self.frm_cloud_actions, text=self.t("cloud_upload"), command=self.cloud_upload_now)
@@ -1794,10 +1919,10 @@ class SteamKeyApp(tk.Tk):
         self._on_save_mode_changed()
 
         self.btn_save_settings = ttk.Button(panel, text=self.t("save_settings"), style="Accent.TButton", command=self.save_settings_from_ui)
-        self.btn_save_settings.grid(row=18, column=1, sticky="e", pady=(16, 0))
+        self.btn_save_settings.grid(row=19, column=1, sticky="e", pady=(16, 0))
 
         self.btn_validate_itad = ttk.Button(panel, text=self.t("validate_itad"), command=self.validate_itad_key)
-        self.btn_validate_itad.grid(row=18, column=0, sticky="w", pady=(16, 0))
+        self.btn_validate_itad.grid(row=19, column=0, sticky="w", pady=(16, 0))
 
         panel.columnconfigure(1, weight=1)
 
@@ -2161,7 +2286,7 @@ class SteamKeyApp(tk.Tk):
             if option.get("bundle_choice") == target:
                 self.var_platform.set(option.get("platform", ""))
                 self.var_bundle_name.set(option.get("bundle_name", ""))
-                self.var_drm.set(option.get("drm", ""))
+                self.var_drm.set(_infer_drm_platform(option.get("drm", ""), option.get("platform", ""), option.get("bundle_name", ""), option.get("url", "")))
                 self.var_bundle_date.set(option.get("bundle_date", ""))
                 return
 
@@ -2172,7 +2297,7 @@ class SteamKeyApp(tk.Tk):
         game["bundle_choice"] = self.var_bundle_choice.get()
         game["platform"] = self.var_platform.get()
         game["bundle_name"] = self.var_bundle_name.get()
-        game["drm"] = self.var_drm.get()
+        game["drm"] = _infer_drm_platform(self.var_drm.get(), game.get("platform", ""), game.get("bundle_name", ""), "")
         game["bundle_date"] = self.var_bundle_date.get()
         game["note"] = self.var_note.get()
         game["keys"] = self._collect_keys()
@@ -2364,7 +2489,14 @@ class SteamKeyApp(tk.Tk):
                 return
             detail_vars["platform"].set(found.get("platform", ""))
             detail_vars["bundle_name"].set(found.get("bundle_name", ""))
-            detail_vars["drm"].set(found.get("drm", ""))
+            detail_vars["drm"].set(
+                _infer_drm_platform(
+                    found.get("drm", ""),
+                    found.get("platform", ""),
+                    found.get("bundle_name", ""),
+                    found.get("url", ""),
+                )
+            )
             detail_vars["bundle_date"].set(found.get("bundle_date", ""))
             currency = self._selected_currency().lower()
             detail_vars["steam_regular"].set(state["price_data"].get(f"regular_{currency}", ""))
@@ -2505,7 +2637,12 @@ class SteamKeyApp(tk.Tk):
                     "bundle_choice": selected_bundle.get("bundle_choice", ""),
                     "platform": selected_bundle.get("platform", ""),
                     "bundle_name": selected_bundle.get("bundle_name", ""),
-                    "drm": selected_bundle.get("drm", ""),
+                    "drm": _infer_drm_platform(
+                        selected_bundle.get("drm", ""),
+                        selected_bundle.get("platform", ""),
+                        selected_bundle.get("bundle_name", ""),
+                        selected_bundle.get("url", ""),
+                    ),
                     "steam_regular_eur": state["price_data"].get("regular_eur", ""),
                     "steam_regular_usd": state["price_data"].get("regular_usd", ""),
                     "steam_lowest_eur": state.get("history_low", {}).get("eur", ""),
@@ -2547,6 +2684,11 @@ class SteamKeyApp(tk.Tk):
         new_theme = self.cmb_theme.get().strip() or "steam"
         new_lang = self.cmb_lang.get().strip() or "en"
         new_currency = _safe_str(self.cmb_currency.get()).upper() or "EUR"
+        try:
+            autosave_minutes = int(_safe_str(self.cmb_autosave.get()).strip() or "5")
+        except Exception:
+            autosave_minutes = 5
+        autosave_minutes = min(240, max(1, autosave_minutes))
         save_mode_label = _safe_str(self.cmb_save_mode.get()).strip()
         new_save_mode = (self.save_mode_map.get(save_mode_label) if hasattr(self, "save_mode_map") else None) or "local"
 
@@ -2554,6 +2696,7 @@ class SteamKeyApp(tk.Tk):
         self.settings["language"] = new_lang if new_lang in TRANSLATIONS else "en"
         self.settings["display_currency"] = new_currency if new_currency in ("EUR", "USD") else "EUR"
         self.settings["save_mode"] = new_save_mode if new_save_mode in ("local", "cloud", "both") else "local"
+        self.settings["autosave_minutes"] = autosave_minutes
         self.settings["cloud_save_url"] = self.ent_cloud_url.get().strip()
         self.settings["cloud_auth_header"] = self.ent_cloud_auth.get().strip()
         self.settings["ITAD_API_KEY"] = self.ent_itad_key.get().strip()
@@ -2571,6 +2714,10 @@ class SteamKeyApp(tk.Tk):
         if self.selected_index is not None and 0 <= self.selected_index < len(self.games):
             self.tree.selection_set(str(self.selected_index))
             self.on_select_game()
+
+        if hasattr(self, "cmb_autosave"):
+            self.cmb_autosave.set(str(self.settings.get("autosave_minutes", 5)))
+        self._schedule_autosave()
 
         self._persist_games(show_errors=False)
         messagebox.showinfo(self.t("ok"), self.t("saved_settings"))
@@ -2610,6 +2757,8 @@ class SteamKeyApp(tk.Tk):
             self.lbl_providers_title.config(text=self.t("providers"))
         if hasattr(self, "lbl_cloud_title"):
             self.lbl_cloud_title.config(text=self.t("cloud"))
+        if hasattr(self, "lbl_autosave"):
+            self.lbl_autosave.config(text=self.t("autosave_interval"))
         if hasattr(self, "cmb_save_mode"):
             self.save_mode_map = {
                 self.t("save_mode_local"): "local",
