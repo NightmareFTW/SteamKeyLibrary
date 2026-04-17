@@ -533,7 +533,7 @@ def _derive_fernet_key(password: str) -> bytes:
 def _cloud_encrypt_payload(games: list, password: str) -> dict:
     """Encrypt games list and return a wrapper dict with the encrypted token."""
     if not _CRYPTO_AVAILABLE:
-        return {"games": games}
+        raise RuntimeError("Encryption requested but cryptography module is not installed.")
     key = _derive_fernet_key(password)
     f = _Fernet(key)
     plaintext = json.dumps({"games": games}, ensure_ascii=False).encode("utf-8")
@@ -640,6 +640,7 @@ def cloud_upload_games(url: str, auth_header: str, games: list, enc_password: st
         headers = dict(HTTP_HEADERS)
         if auth_header:
             headers["Authorization"] = auth_header
+        enc_password = _safe_str(enc_password).strip()
         payload = _cloud_encrypt_payload(games, enc_password) if enc_password else {"games": games}
 
         if _is_jsonbin_url(url):

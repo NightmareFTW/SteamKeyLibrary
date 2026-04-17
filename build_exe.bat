@@ -9,7 +9,7 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 echo Using Python: %PY%
-"%PY%" -m pip install --upgrade pyinstaller
+"%PY%" -m pip install --upgrade pyinstaller cryptography
 if errorlevel 1 goto :error
 
 "%PY%" -m PyInstaller --noconfirm --clean --windowed --onefile --name "SteamKeyLibrary" "steamkeylibrary.py"
