@@ -15,6 +15,15 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from PIL import Image, ImageTk
 
+try:
+    import base64 as _b64
+    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC as _PBKDF2HMAC
+    _CRYPTO_AVAILABLE = True
+except ImportError:
+    _CRYPTO_AVAILABLE = False
+
 
 if getattr(sys, "frozen", False):
     APP_DIR = os.path.dirname(sys.executable)
@@ -90,6 +99,8 @@ TRANSLATIONS = {
         "cloud_save_failed": "Failed to upload cloud save.",
         "cloud_load_ok": "Cloud save loaded successfully.",
         "cloud_save_ok": "Cloud save uploaded successfully.",
+        "cloud_enc_password": "Cloud Encryption Password",
+        "tooltip_cloud_enc_password": "Optional password to encrypt cloud saves.\nData stored in the cloud will be unreadable without this password.\nLeave empty to disable encryption.\nIMPORTANT: if you lose this password, your cloud data cannot be recovered.",
         "cloud_jsonbin_tutorial_btn": "Cloud Setup Guide",
         "cloud_jsonbin_tutorial_title": "Cloud Save Setup",
         "cloud_jsonbin_tutorial_body": "=== OPTION A: GitHub Gist (Recommended — Free, No Size Limit) ===\n\n1. Go to https://gist.github.com and sign in to your GitHub account.\n\n2. Create a new Gist:\n   - Description: SteamKeyLibrary\n   - Filename: games.json\n   - Content: {\"games\": []}\n   - Set visibility to Secret (private but accessible via API).\n\n3. Click 'Create secret gist'.\n\n4. Copy the Gist ID from the URL:\n   https://gist.github.com/YOUR_USERNAME/GIST_ID\n   (the long alphanumeric string at the end)\n\n5. Set Cloud Save URL to:\n   https://api.github.com/gists/GIST_ID\n\n6. Create a GitHub Personal Access Token:\n   - Go to: GitHub -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)\n   - Click 'Generate new token (classic)'\n   - Give it a name (e.g. SteamKeyLibrary)\n   - Enable the 'gist' scope only\n   - Click 'Generate token' and copy it immediately\n\n7. In Cloud Auth Header, paste:\n   Bearer ghp_YOUR_TOKEN\n\n8. Use 'Upload to Cloud' then 'Load from Cloud' to verify sync.\n\n\n=== OPTION B: JSONBin.io (Free tier has ~128KB limit) ===\n\n1. Create an account at jsonbin.io and create a new bin.\n2. Save valid JSON: {\"games\": []}\n3. Set Cloud Save URL to: https://api.jsonbin.io/v3/b/YOUR_BIN_ID\n4. In Cloud Auth Header, paste your Master Key or Access Key.\n5. Use 'Upload to Cloud' and then 'Load from Cloud' to verify sync.",
@@ -197,6 +208,8 @@ TRANSLATIONS = {
         "cloud_save_failed": "Falha ao enviar save para a cloud.",
         "cloud_load_ok": "Save cloud carregado com sucesso.",
         "cloud_save_ok": "Save cloud enviado com sucesso.",
+        "cloud_enc_password": "Password de Encriptação Cloud",
+        "tooltip_cloud_enc_password": "Password opcional para encriptar os saves na cloud.\nOs dados guardados na cloud serão ilegíveis sem esta password.\nDeixa vazio para desactivar a encriptação.\nIMPORTANTE: se perderes esta password, os dados na cloud não podem ser recuperados.",
         "cloud_jsonbin_tutorial_btn": "Guia de Configuração Cloud",
         "cloud_jsonbin_tutorial_title": "Configuração do Save Cloud",
         "cloud_jsonbin_tutorial_body": "=== OPÇÃO A: GitHub Gist (Recomendado — Gratuito, Sem Limite de Tamanho) ===\n\n1. Vai a https://gist.github.com e entra na tua conta GitHub.\n\n2. Cria um novo Gist:\n   - Descrição: SteamKeyLibrary\n   - Nome do ficheiro: games.json\n   - Conteúdo: {\"games\": []}\n   - Define a visibilidade como Secret (privado mas acessível via API).\n\n3. Clica em 'Create secret gist'.\n\n4. Copia o Gist ID da URL:\n   https://gist.github.com/SEU_USERNAME/GIST_ID\n   (a sequência alfanumérica longa no final)\n\n5. Define o Link do save cloud como:\n   https://api.github.com/gists/GIST_ID\n\n6. Cria um Personal Access Token do GitHub:\n   - Vai a: GitHub -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic)\n   - Clica em 'Generate new token (classic)'\n   - Dá-lhe um nome (ex.: SteamKeyLibrary)\n   - Activa apenas o scope 'gist'\n   - Clica em 'Generate token' e copia-o imediatamente\n\n7. Em Header de autenticação cloud, escreve:\n   Bearer ghp_O_TEU_TOKEN\n\n8. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar a sincronização.\n\n\n=== OPÇÃO B: JSONBin.io (tier gratuito tem limite ~128KB) ===\n\n1. Cria conta em jsonbin.io e cria um novo bin.\n2. Guarda JSON válido: {\"games\": []}\n3. Define o Link do save cloud como: https://api.jsonbin.io/v3/b/SEU_BIN_ID\n4. Em Header de autenticação cloud, coloca a tua Master Key ou Access Key.\n5. Usa 'Enviar para a cloud' e depois 'Carregar da cloud' para validar.",
@@ -462,6 +475,7 @@ def default_settings():
         "autosave_minutes": 5,
         "cloud_save_url": os.getenv("CLOUD_SAVE_URL", ""),
         "cloud_auth_header": os.getenv("CLOUD_AUTH_HEADER", ""),
+        "cloud_encryption_password": "",
         "ITAD_API_KEY": os.getenv("ITAD_API_KEY", ""),
         "ITAD_COUNTRY": os.getenv("ITAD_COUNTRY", "PT"),
         "fallback_enabled": bool(os.getenv("BARTER_BUNDLES_URL")),
@@ -502,7 +516,55 @@ def save_games(games):
     _save_json(DATA_FILE, games)
 
 
-def cloud_download_games(url: str, auth_header: str = ""):
+_CLOUD_ENC_SALT = b"SteamKeyLibrary_cloud_enc_v1"
+_CLOUD_ENC_PREFIX = "SKLE1:"
+
+
+def _derive_fernet_key(password: str) -> bytes:
+    kdf = _PBKDF2HMAC(
+        algorithm=_hashes.SHA256(),
+        length=32,
+        salt=_CLOUD_ENC_SALT,
+        iterations=390000,
+    )
+    return _b64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+
+
+def _cloud_encrypt_payload(games: list, password: str) -> dict:
+    """Encrypt games list and return a wrapper dict with the encrypted token."""
+    if not _CRYPTO_AVAILABLE:
+        return {"games": games}
+    key = _derive_fernet_key(password)
+    f = _Fernet(key)
+    plaintext = json.dumps({"games": games}, ensure_ascii=False).encode("utf-8")
+    token = f.encrypt(plaintext)
+    return {"encrypted": _CLOUD_ENC_PREFIX + token.decode("ascii")}
+
+
+def _cloud_decrypt_payload(payload: dict, password: str):
+    """Decrypt an encrypted payload dict. Returns (games_list, error_str).
+    If payload is not encrypted, returns (None, '') so caller handles it normally."""
+    enc_val = payload.get("encrypted", "")
+    if not isinstance(enc_val, str) or not enc_val.startswith(_CLOUD_ENC_PREFIX):
+        return None, ""
+    if not _CRYPTO_AVAILABLE:
+        return None, "cryptography module is not installed. Cannot decrypt cloud data."
+    token = enc_val[len(_CLOUD_ENC_PREFIX):].encode("ascii")
+    try:
+        key = _derive_fernet_key(password)
+        f = _Fernet(key)
+        plaintext = f.decrypt(token)
+        inner = json.loads(plaintext)
+        if isinstance(inner, dict) and isinstance(inner.get("games"), list):
+            return inner["games"], ""
+        return None, "Decrypted payload has unexpected format."
+    except _InvalidToken:
+        return None, "Decryption failed: wrong password or corrupted data."
+    except Exception as exc:
+        return None, f"Decryption error: {exc}"
+
+
+def cloud_download_games(url: str, auth_header: str = "", enc_password: str = ""):
     if not url:
         return None, "Missing cloud URL"
     try:
@@ -517,7 +579,7 @@ def cloud_download_games(url: str, auth_header: str = ""):
             r = requests.get(download_url, headers=headers, timeout=25)
             if r.status_code != 200:
                 return None, f"HTTP {r.status_code}: {_extract_reason(r)}"
-            return _parse_cloud_games_payload(r)
+            return _parse_cloud_games_payload(r, enc_password)
 
         if _is_github_gist_url(url):
             gist_id = _extract_gist_id(url)
@@ -541,7 +603,7 @@ def cloud_download_games(url: str, auth_header: str = ""):
             r2 = requests.get(raw_url, timeout=25)
             if r2.status_code != 200:
                 return None, f"Failed to fetch Gist raw content: HTTP {r2.status_code}"
-            return _parse_cloud_games_payload(r2)
+            return _parse_cloud_games_payload(r2, enc_password)
 
         drive_file_id = _extract_google_drive_file_id(url)
         if drive_file_id:
@@ -561,24 +623,24 @@ def cloud_download_games(url: str, auth_header: str = ""):
             if "text/html" in content_type and ("<html" in body.lower() or "google drive" in body.lower()):
                 return None, "Google Drive file is not publicly readable. Share it with 'Anyone with the link' or use Bearer auth."
 
-            return _parse_cloud_games_payload(r)
+            return _parse_cloud_games_payload(r, enc_password)
 
         r = requests.get(url, headers=headers, timeout=25)
         if r.status_code != 200:
             return None, f"HTTP {r.status_code}: {_extract_reason(r)}"
-        return _parse_cloud_games_payload(r)
+        return _parse_cloud_games_payload(r, enc_password)
     except Exception as exc:
         return None, str(exc)
 
 
-def cloud_upload_games(url: str, auth_header: str, games: list):
+def cloud_upload_games(url: str, auth_header: str, games: list, enc_password: str = ""):
     if not url:
         return False, "Missing cloud URL"
     try:
         headers = dict(HTTP_HEADERS)
         if auth_header:
             headers["Authorization"] = auth_header
-        payload = {"games": games}
+        payload = _cloud_encrypt_payload(games, enc_password) if enc_password else {"games": games}
 
         if _is_jsonbin_url(url):
             upload_url = _jsonbin_upload_url(url)
@@ -726,7 +788,30 @@ def _jsonbin_auth_headers(auth_header: str) -> dict:
     return {"X-Master-Key": auth}
 
 
-def _parse_cloud_games_payload(response):
+def _parse_games_from_dict(payload, enc_password: str = ""):
+    """Extract games list from a parsed JSON payload dict/list, handling encryption."""
+    if isinstance(payload, dict) and "encrypted" in payload:
+        if enc_password:
+            games, err = _cloud_decrypt_payload(payload, enc_password)
+            if err:
+                return None, err
+            if games is not None:
+                return games, ""
+        else:
+            return None, "Cloud data is encrypted. Set a Cloud Encryption Password in Settings."
+
+    if isinstance(payload, list):
+        return payload, ""
+    if isinstance(payload, dict) and isinstance(payload.get("record"), list):
+        return payload.get("record"), ""
+    if isinstance(payload, dict) and isinstance(payload.get("record"), dict) and isinstance(payload.get("record").get("games"), list):
+        return payload.get("record").get("games"), ""
+    if isinstance(payload, dict) and isinstance(payload.get("games"), list):
+        return payload.get("games"), ""
+    return None, "Cloud payload format is invalid"
+
+
+def _parse_cloud_games_payload(response, enc_password: str = ""):
     try:
         payload = response.json()
     except Exception:
@@ -738,15 +823,7 @@ def _parse_cloud_games_payload(response):
         except Exception:
             return None, "Cloud payload format is invalid"
 
-    if isinstance(payload, list):
-        return payload, ""
-    if isinstance(payload, dict) and isinstance(payload.get("record"), list):
-        return payload.get("record"), ""
-    if isinstance(payload, dict) and isinstance(payload.get("record"), dict) and isinstance(payload.get("record").get("games"), list):
-        return payload.get("record").get("games"), ""
-    if isinstance(payload, dict) and isinstance(payload.get("games"), list):
-        return payload.get("games"), ""
-    return None, "Cloud payload format is invalid"
+    return _parse_games_from_dict(payload, enc_password)
 
 
 def get_steam_applist():
@@ -1504,7 +1581,7 @@ class SteamKeyApp(tk.Tk):
         cloud_auth = _safe_str(self.settings.get("cloud_auth_header", "")).strip()
 
         if mode in ("cloud", "both") and cloud_url:
-            remote_games, err = cloud_download_games(cloud_url, cloud_auth)
+            remote_games, err = cloud_download_games(cloud_url, cloud_auth, self.settings.get("cloud_encryption_password", ""))
             if isinstance(remote_games, list):
                 if mode == "both":
                     save_games(remote_games)
@@ -1522,7 +1599,7 @@ class SteamKeyApp(tk.Tk):
             return
 
         def worker():
-            remote_games, err = cloud_download_games(cloud_url, cloud_auth)
+            remote_games, err = cloud_download_games(cloud_url, cloud_auth, self.settings.get("cloud_encryption_password", ""))
             if isinstance(remote_games, list):
                 self.after(0, lambda: self._apply_cloud_games(remote_games, mode))
             else:
@@ -1545,7 +1622,7 @@ class SteamKeyApp(tk.Tk):
             save_games(self.games)
 
         if mode in ("cloud", "both"):
-            ok, err = cloud_upload_games(cloud_url, cloud_auth, self.games)
+            ok, err = cloud_upload_games(cloud_url, cloud_auth, self.games, self.settings.get("cloud_encryption_password", ""))
             if not ok and show_errors:
                 messagebox.showwarning(self.t("warning"), f"{self.t('cloud_save_failed')}\n\n{err}")
 
@@ -1612,10 +1689,11 @@ class SteamKeyApp(tk.Tk):
     def cloud_upload_now(self):
         cloud_url = _safe_str(self.ent_cloud_url.get() if hasattr(self, "ent_cloud_url") else self.settings.get("cloud_save_url", "")).strip()
         cloud_auth = _safe_str(self.ent_cloud_auth.get() if hasattr(self, "ent_cloud_auth") else self.settings.get("cloud_auth_header", "")).strip()
+        enc_pw = self.ent_cloud_enc.get() if hasattr(self, "ent_cloud_enc") else self.settings.get("cloud_encryption_password", "")
         if not cloud_url:
             messagebox.showwarning(self.t("warning"), self.t("cloud_missing_url"))
             return
-        ok, err = cloud_upload_games(cloud_url, cloud_auth, self.games)
+        ok, err = cloud_upload_games(cloud_url, cloud_auth, self.games, enc_pw)
         if ok:
             messagebox.showinfo(self.t("ok"), self.t("cloud_save_ok"))
         else:
@@ -1624,10 +1702,11 @@ class SteamKeyApp(tk.Tk):
     def cloud_download_now(self):
         cloud_url = _safe_str(self.ent_cloud_url.get() if hasattr(self, "ent_cloud_url") else self.settings.get("cloud_save_url", "")).strip()
         cloud_auth = _safe_str(self.ent_cloud_auth.get() if hasattr(self, "ent_cloud_auth") else self.settings.get("cloud_auth_header", "")).strip()
+        enc_pw = self.ent_cloud_enc.get() if hasattr(self, "ent_cloud_enc") else self.settings.get("cloud_encryption_password", "")
         if not cloud_url:
             messagebox.showwarning(self.t("warning"), self.t("cloud_missing_url"))
             return
-        remote_games, err = cloud_download_games(cloud_url, cloud_auth)
+        remote_games, err = cloud_download_games(cloud_url, cloud_auth, enc_pw)
         if not isinstance(remote_games, list):
             messagebox.showerror(self.t("error"), f"{self.t('cloud_load_failed')}\n\n{err}")
             return
@@ -2016,8 +2095,15 @@ class SteamKeyApp(tk.Tk):
         self.ent_cloud_auth.insert(0, self.settings.get("cloud_auth_header", ""))
         self.ent_cloud_auth.grid(row=17, column=1, sticky="ew", pady=6)
 
+        self.lbl_cloud_enc = ttk.Label(panel, text=self.t("cloud_enc_password"), style="Surface.TLabel")
+        self.lbl_cloud_enc.grid(row=18, column=0, sticky="w", pady=6)
+        self.ent_cloud_enc = ttk.Entry(panel, show="\u2022")
+        self.ent_cloud_enc.insert(0, self.settings.get("cloud_encryption_password", ""))
+        self.ent_cloud_enc.grid(row=18, column=1, sticky="ew", pady=6)
+        self._add_help_icon(panel, 18, 2, lambda: self.t("tooltip_cloud_enc_password"))
+
         self.frm_cloud_actions = ttk.Frame(panel, style="Surface.TFrame")
-        self.frm_cloud_actions.grid(row=18, column=1, sticky="w", pady=(4, 0))
+        self.frm_cloud_actions.grid(row=19, column=1, sticky="w", pady=(4, 0))
         self.btn_cloud_download = ttk.Button(self.frm_cloud_actions, text=self.t("cloud_download"), command=self.cloud_download_now)
         self.btn_cloud_download.pack(side="left", padx=(0, 8))
         self.btn_cloud_upload = ttk.Button(self.frm_cloud_actions, text=self.t("cloud_upload"), command=self.cloud_upload_now)
@@ -2033,10 +2119,10 @@ class SteamKeyApp(tk.Tk):
         self._on_save_mode_changed()
 
         self.btn_save_settings = ttk.Button(panel, text=self.t("save_settings"), style="Accent.TButton", command=self.save_settings_from_ui)
-        self.btn_save_settings.grid(row=19, column=1, sticky="e", pady=(16, 0))
+        self.btn_save_settings.grid(row=20, column=1, sticky="e", pady=(16, 0))
 
         self.btn_validate_itad = ttk.Button(panel, text=self.t("validate_itad"), command=self.validate_itad_key)
-        self.btn_validate_itad.grid(row=19, column=0, sticky="w", pady=(16, 0))
+        self.btn_validate_itad.grid(row=20, column=0, sticky="w", pady=(16, 0))
 
         panel.columnconfigure(1, weight=1)
 
@@ -2860,6 +2946,7 @@ class SteamKeyApp(tk.Tk):
         self.settings["autosave_minutes"] = autosave_minutes
         self.settings["cloud_save_url"] = self.ent_cloud_url.get().strip()
         self.settings["cloud_auth_header"] = self.ent_cloud_auth.get().strip()
+        self.settings["cloud_encryption_password"] = self.ent_cloud_enc.get() if hasattr(self, "ent_cloud_enc") else self.settings.get("cloud_encryption_password", "")
         self.settings["ITAD_API_KEY"] = self.ent_itad_key.get().strip()
         self.settings["ITAD_COUNTRY"] = self.ent_itad_country.get().strip().upper() or "PT"
         self.settings["fallback_enabled"] = bool(self.var_fallback_enabled.get())
