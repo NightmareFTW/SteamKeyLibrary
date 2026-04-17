@@ -303,6 +303,19 @@ THEMES = {
 
 DEBUG_LOGS = []
 
+ACTIVATION_PLATFORMS = [
+    "Steam",
+    "GOG",
+    "Ubisoft Connect",
+    "EA App",
+    "Epic Games",
+    "Battle.net",
+    "Rockstar Games Launcher",
+    "Microsoft Store",
+    "Xbox / Microsoft Store",
+    "Other / Unknown",
+]
+
 
 class InfoTooltip:
     def __init__(self, root, widget, text, palette):
@@ -1795,7 +1808,12 @@ class SteamKeyApp(tk.Tk):
 
         row = self._detail_entry(parent, row, self.t("platform"), self.var_platform, readonly=True)
         row = self._detail_entry(parent, row, self.t("bundle_name"), self.var_bundle_name, readonly=True)
-        row = self._detail_entry(parent, row, self.t("drm"), self.var_drm, readonly=True)
+
+        ttk.Label(parent, text=self.t("drm"), style="Surface.TLabel").grid(row=row, column=0, sticky="w", pady=4)
+        self.cmb_activation_platform = ttk.Combobox(parent, textvariable=self.var_drm, state="readonly", values=ACTIVATION_PLATFORMS)
+        self.cmb_activation_platform.grid(row=row, column=1, sticky="ew", pady=4)
+        row += 1
+
         row = self._detail_entry(parent, row, self.t("steam_regular"), self.var_regular, readonly=True)
         row = self._detail_entry(parent, row, self.t("steam_lowest"), self.var_lowest, readonly=True)
         row = self._detail_entry(parent, row, self.t("best_price_shop"), self.var_best_price_shop, readonly=True)
@@ -2313,6 +2331,13 @@ class SteamKeyApp(tk.Tk):
         self.var_platform.set(game.get("platform", ""))
         self.var_bundle_name.set(game.get("bundle_name", ""))
         self.var_drm.set(game.get("drm", ""))
+        if hasattr(self, "cmb_activation_platform"):
+            current = _safe_str(game.get("drm", "")).strip()
+            values = list(ACTIVATION_PLATFORMS)
+            if current and current not in values:
+                values.append(current)
+            self.cmb_activation_platform.configure(values=values)
+            self.cmb_activation_platform.set(current)
         self.var_regular.set(self._game_price_value(game, "steam_regular"))
         self.var_lowest.set(self._game_price_value(game, "steam_lowest"))
         self.var_best_price_shop.set(game.get("best_price_shop", ""))
