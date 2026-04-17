@@ -61,7 +61,7 @@ TRANSLATIONS = {
         "bundle_dropdown": "Bundles",
         "platform": "Bundle Platform",
         "bundle_name": "Bundle Name",
-        "drm": "DRM",
+        "drm": "Activation Platform",
         "steam_regular_eur": "Steam Regular EUR",
         "steam_regular_usd": "Steam Regular USD",
         "steam_lowest_eur": "Steam Lowest EUR",
@@ -168,7 +168,7 @@ TRANSLATIONS = {
         "bundle_dropdown": "Bundles",
         "platform": "Plataforma do Bundle",
         "bundle_name": "Nome do Bundle",
-        "drm": "DRM",
+        "drm": "Plataforma",
         "steam_regular_eur": "Preço regular Steam EUR",
         "steam_regular_usd": "Preço regular Steam USD",
         "steam_lowest_eur": "Preço em saldo Steam EUR",
@@ -921,9 +921,29 @@ def _infer_drm_platform(drm_hint: str = "", platform_hint: str = "", bundle_name
         if needle in text:
             return label
 
-    # Keep known provider labels when activation platform is not explicitly available.
-    raw = _safe_str(drm_hint).strip() or _safe_str(platform_hint).strip()
-    return raw
+    # Bundle/store providers usually sell Steam keys in this app context.
+    # If we only have provider names, normalize activation platform to Steam.
+    provider_only = {
+        "humble",
+        "humble bundle",
+        "fanatical",
+        "indiegala",
+        "gamesplanet",
+        "gamersgate",
+        "green man gaming",
+        "gmg",
+        "wingamestore",
+        "barter.vg",
+        "steamgifts",
+        "bundle stars",
+        "bundlestars",
+    }
+    raw = (_safe_str(drm_hint).strip() or _safe_str(platform_hint).strip()).lower()
+    if raw in provider_only:
+        return "Steam"
+
+    # Keep remaining labels as-is when we cannot infer better.
+    return _safe_str(drm_hint).strip() or _safe_str(platform_hint).strip()
 
 
 def normalize_bundle_item(raw: dict, source: str):
@@ -1333,7 +1353,7 @@ def ensure_game_defaults(game: dict):
         _safe_str(out.get("bundle_name", "")),
         "",
     )
-    if not current_drm and inferred:
+    if inferred and inferred != current_drm:
         out["drm"] = inferred
     return out
 
