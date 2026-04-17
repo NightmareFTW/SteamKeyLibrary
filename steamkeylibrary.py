@@ -1290,7 +1290,7 @@ class SteamKeyApp(tk.Tk):
         self._icon_image = None
         self.settings = load_settings()
         self.lang = self.settings.get("language", "en")
-        self.games = [ensure_game_defaults(g) for g in self._load_initial_games()]
+        self.games = [ensure_game_defaults(g) for g in load_games()]
         self.applist = []
         self.selected_index = None
         self.current_palette = THEMES["steam"]
@@ -1310,6 +1310,7 @@ class SteamKeyApp(tk.Tk):
         self._build_ui()
         self._refresh_tree()
         self._load_applist_async()
+        self._sync_cloud_on_startup()
 
     def _apply_app_icon(self):
         """Apply a custom icon for the title bar and Windows taskbar when available."""
@@ -1345,6 +1346,29 @@ class SteamKeyApp(tk.Tk):
             _log(f"Cloud load failed at startup: {err}")
 
         return load_games()
+
+    def _sync_cloud_on_startup(self):
+        mode = _safe_str(self.settings.get("save_mode", "local"))
+        cloud_url = _safe_str(self.settings.get("cloud_save_url", "")).strip()
+        cloud_auth = _safe_str(self.settings.get("cloud_auth_header", "")).strip()
+
+        if mode not in ("cloud", "both") or not cloud_url:
+            return
+
+        def worker():
+            remote_games, err = cloud_download_games(cloud_url, cloud_auth)
+            if isinstance(remote_games, list):
+                self.after(0, lambda: self._apply_cloud_games(remote_games, mode))
+            else:
+                _log(f"Cloud sync at startup failed: {err}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_cloud_games(self, remote_games, mode):
+        self.games = [ensure_game_defaults(g) for g in remote_games]
+        if mode == "both":
+            save_games(self.games)
+        self._refresh_tree()
 
     def _persist_games(self, show_errors=True):
         mode = _safe_str(self.settings.get("save_mode", "local"))
