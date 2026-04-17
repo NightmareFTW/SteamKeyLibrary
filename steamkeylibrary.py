@@ -533,7 +533,7 @@ def _derive_fernet_key(password: str) -> bytes:
 def _cloud_encrypt_payload(games: list, password: str) -> dict:
     """Encrypt games list and return a wrapper dict with the encrypted token."""
     if not _CRYPTO_AVAILABLE:
-        raise RuntimeError("Encryption requested but cryptography module is not installed.")
+        raise RuntimeError("Encryption requested but cryptography module is not installed.\n\nFor cloud encryption support, use the .pyw launcher instead of the .exe:\n\nOpenSteamKeyLibrary.pyw\n\nOr run from terminal:\npython OpenSteamKeyLibrary.py")
     key = _derive_fernet_key(password)
     f = _Fernet(key)
     plaintext = json.dumps({"games": games}, ensure_ascii=False).encode("utf-8")
