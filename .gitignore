@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+.conda/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+
+# App runtime/user data (keep local, do not publish personal data)
+games.json
+settings.json
+itad_cache.json
+steam_applist.json
+
+# Build artifacts
+build/
+dist/
+*.spec
