@@ -1355,6 +1355,9 @@ class SteamKeyApp(tk.Tk):
         self.oauth_url = ""
         self._autosave_job = None
         self._is_closing = False
+        self._tree_columns = ()
+        self._tree_sort_column = None
+        self._tree_sort_direction = None
 
         self.style = ttk.Style(self)
         self._apply_theme(self.settings.get("theme", "steam"))
@@ -1699,6 +1702,7 @@ class SteamKeyApp(tk.Tk):
             "bundle_date",
             "status",
         )
+        self._tree_columns = columns
         self.tree = ttk.Treeview(left, columns=columns, show="headings")
         self.tree.pack(fill="both", expand=True)
         x_scroll = ttk.Scrollbar(left, orient="horizontal", command=self.tree.xview)
@@ -1735,7 +1739,7 @@ class SteamKeyApp(tk.Tk):
             "status": 90,
         }
         for col in columns:
-            self.tree.heading(col, text=headings[col])
+            self.tree.heading(col, text=headings[col], command=lambda c=col: self._cycle_tree_sort(c))
             self.tree.column(col, width=widths[col], anchor="w")
 
         self._build_details_panel(right)
@@ -2188,6 +2192,42 @@ class SteamKeyApp(tk.Tk):
         self.applist = apps
         self.lbl_status.config(text=self.t("ready"))
 
+    def _cycle_tree_sort(self, column: str):
+        if self._tree_sort_column != column:
+            self._tree_sort_column = column
+            self._tree_sort_direction = "asc"
+        elif self._tree_sort_direction == "asc":
+            self._tree_sort_direction = "desc"
+        elif self._tree_sort_direction == "desc":
+            self._tree_sort_column = None
+            self._tree_sort_direction = None
+        else:
+            self._tree_sort_direction = "asc"
+        self._refresh_tree()
+
+    def _parse_numeric(self, value):
+        text = _safe_str(value).strip().replace(",", ".")
+        if not text:
+            return float("inf")
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+        if not m:
+            return float("inf")
+        try:
+            return float(m.group(0))
+        except Exception:
+            return float("inf")
+
+    def _sort_key_for_column(self, game: dict, column: str):
+        if column == "steam_regular":
+            return self._parse_numeric(self._game_price_value(game, "steam_regular"))
+        if column == "steam_lowest":
+            return self._parse_numeric(self._game_price_value(game, "steam_lowest"))
+        if column == "best_price_value":
+            return self._parse_numeric(game.get("best_price_value", ""))
+        if column == "bundle_date":
+            return _safe_str(game.get("bundle_date", "")).strip() or "9999-99-99"
+        return _safe_str(game.get(column, "")).strip().lower()
+
     def _refresh_tree(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -2208,6 +2248,10 @@ class SteamKeyApp(tk.Tk):
                 if filter_text not in hay:
                     continue
             visible.append(index)
+
+        if self._tree_sort_column and self._tree_sort_direction in ("asc", "desc"):
+            reverse = self._tree_sort_direction == "desc"
+            visible.sort(key=lambda idx: self._sort_key_for_column(self.games[idx], self._tree_sort_column), reverse=reverse)
 
         for row_no, index in enumerate(visible):
             g = self.games[index]
@@ -2775,18 +2819,18 @@ class SteamKeyApp(tk.Tk):
         if hasattr(self, "lbl_cloud_auth"):
             self.lbl_cloud_auth.config(text=self.t("cloud_auth"))
 
-        self.tree.heading("title", text=self.t("game"))
-        self.tree.heading("bundle_choice", text=self.t("bundle_dropdown"))
-        self.tree.heading("platform", text=self.t("platform"))
-        self.tree.heading("bundle_name", text=self.t("bundle_name"))
-        self.tree.heading("drm", text=self.t("drm"))
+        self.tree.heading("bundle_choice", text=self.t("bundle_dropdown"), command=lambda c="bundle_choice": self._cycle_tree_sort(c))
+        self.tree.heading("platform", text=self.t("platform"), command=lambda c="platform": self._cycle_tree_sort(c))
+        self.tree.heading("bundle_name", text=self.t("bundle_name"), command=lambda c="bundle_name": self._cycle_tree_sort(c))
+        self.tree.heading("drm", text=self.t("drm"), command=lambda c="drm": self._cycle_tree_sort(c))
         currency = self._selected_currency()
-        self.tree.heading("steam_regular", text=f"{self.t('steam_regular')} {currency}")
-        self.tree.heading("steam_lowest", text=f"{self.t('steam_lowest')} {currency}")
-        self.tree.heading("best_price_shop", text=self.t("best_price_shop"))
-        self.tree.heading("best_price_value", text=self.t("best_price_value"))
-        self.tree.heading("bundle_date", text=self.t("bundle_date"))
-        self.tree.heading("status", text=self.t("status"))
+        self.tree.heading("title", text=self.t("game"), command=lambda c="title": self._cycle_tree_sort(c))
+        self.tree.heading("steam_regular", text=f"{self.t('steam_regular')} {currency}", command=lambda c="steam_regular": self._cycle_tree_sort(c))
+        self.tree.heading("steam_lowest", text=f"{self.t('steam_lowest')} {currency}", command=lambda c="steam_lowest": self._cycle_tree_sort(c))
+        self.tree.heading("best_price_shop", text=self.t("best_price_shop"), command=lambda c="best_price_shop": self._cycle_tree_sort(c))
+        self.tree.heading("best_price_value", text=self.t("best_price_value"), command=lambda c="best_price_value": self._cycle_tree_sort(c))
+        self.tree.heading("bundle_date", text=self.t("bundle_date"), command=lambda c="bundle_date": self._cycle_tree_sort(c))
+        self.tree.heading("status", text=self.t("status"), command=lambda c="status": self._cycle_tree_sort(c))
 
         if hasattr(self, "ent_filter"):
             self.ent_filter.delete(0, tk.END)
