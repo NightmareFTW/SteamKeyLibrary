@@ -1,7 +1,5 @@
 # Steam Key Library
 
-[PT-PT](README.pt-PT.md) | [EN](README.en.md)
-
 Aplicacao desktop em Python + Tkinter para gerir chaves Steam, registar origem de bundles e obter dados de preco da Steam/ITAD.
 
 ## Funcionalidades
