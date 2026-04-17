@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 if exist ".venv\Scripts\pythonw.exe" (
-    start "" ".venv\Scripts\pythonw.exe" "steamkeylibrary.py"
+    start "" ".venv\Scripts\pythonw.exe" "OpenSteamKeyLibrary.pyw"
 ) else (
-    start "" pythonw "steamkeylibrary.py"
+    start "" pythonw "OpenSteamKeyLibrary.pyw"
 )
